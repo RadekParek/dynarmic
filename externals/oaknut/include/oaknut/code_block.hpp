@@ -25,6 +25,10 @@
 #    if defined(__ANDROID__)
 #        include <sys/types.h>
 #        include <unistd.h>
+#        include <sys/syscall.h>
+#        ifndef __NR_memfd_create
+#            define __NR_memfd_create 279
+#        endif
 #    endif
 #endif
 
@@ -49,7 +53,7 @@ public:
         m_memory = (std::uint32_t*)mmap(nullptr, size, PROT_READ | PROT_EXEC, MAP_ANON | MAP_PRIVATE, -1, 0);
 #else
 #    if defined(__ANDROID__)
-        fd = memfd_create("oaknut_code_block", 0);
+        fd = static_cast<int>(syscall(__NR_memfd_create, "oaknut_code_block", 0));
         if (fd < 0 || ftruncate(fd, size) != 0)
             throw std::bad_alloc{};
         m_write_memory = (std::uint32_t*)mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -94,9 +98,11 @@ public:
         return m_write_memory;
     }
 
-    std::uint32_t* xptr() const
+    template<typename T>
+    T xptr() const
     {
-        return m_memory;
+        static_assert(std::is_pointer_v<T> || std::is_same_v<T, std::uintptr_t> || std::is_same_v<T, std::intptr_t>);
+        return reinterpret_cast<T>(m_memory);
     }
 
     void protect()
