@@ -23,7 +23,7 @@ namespace Dynarmic::Backend::Arm64 {
 AddressSpace::AddressSpace(size_t code_cache_size)
         : code_cache_size(code_cache_size)
         , mem(code_cache_size)
-        , code(mem.ptr(), mem.ptr())
+        , code(mem.ptr(), mem.xptr())
         , fastmem_manager(exception_handler) {
     ASSERT_MSG(code_cache_size <= 128 * 1024 * 1024, "code_cache_size > 128 MiB not currently supported");
 
@@ -98,7 +98,8 @@ void AddressSpace::ClearCache() {
 }
 
 void AddressSpace::DumpDisassembly() const {
-    for (u32* ptr = mem.ptr(); ptr < code.xptr<u32*>(); ptr++) {
+    for (size_t offset = 0; offset < code.offset(); offset += sizeof(u32)) {
+        const auto ptr = mem.xptr<u32*>() + offset / sizeof(u32);
         std::printf("%s", Common::DisassembleAArch64(*ptr, mcl::bit_cast<u64>(ptr)).c_str());
     }
 }
@@ -136,7 +137,7 @@ void AddressSpace::Link(EmittedBlockInfo& block_info) {
     using namespace oaknut::util;
 
     for (auto [ptr_offset, target] : block_info.relocations) {
-        CodeGenerator c{mem.ptr(), mem.ptr()};
+        CodeGenerator c{mem.ptr(), mem.xptr()};
         c.set_xptr(reinterpret_cast<u32*>(block_info.entry_point + ptr_offset));
 
         switch (target) {
@@ -276,7 +277,7 @@ void AddressSpace::LinkBlockLinks(const CodePtr entry_point, const CodePtr targe
     using namespace oaknut::util;
 
     for (auto [ptr_offset, type] : block_relocations_list) {
-        CodeGenerator c{mem.ptr(), mem.ptr()};
+        CodeGenerator c{mem.ptr(), mem.xptr()};
         c.set_xptr(reinterpret_cast<u32*>(entry_point + ptr_offset));
 
         switch (type) {

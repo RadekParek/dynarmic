@@ -18,7 +18,14 @@
 #    include <sys/mman.h>
 #    include <unistd.h>
 #else
+#    if defined(__ANDROID__) && !defined(_GNU_SOURCE)
+#        define _GNU_SOURCE
+#    endif
 #    include <sys/mman.h>
+#    if defined(__ANDROID__)
+#        include <sys/types.h>
+#        include <unistd.h>
+#    endif
 #endif
 
 namespace oaknut {
@@ -42,13 +49,22 @@ public:
         m_memory = (std::uint32_t*)mmap(nullptr, size, PROT_READ | PROT_EXEC, MAP_ANON | MAP_PRIVATE, -1, 0);
 #else
 #    if defined(__ANDROID__)
-        m_memory = (std::uint32_t*)mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+        fd = memfd_create("oaknut_code_block", 0);
+        if (fd < 0 || ftruncate(fd, size) != 0)
+            throw std::bad_alloc{};
+        m_write_memory = (std::uint32_t*)mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        m_memory = (std::uint32_t*)mmap(nullptr, size, PROT_READ | PROT_EXEC, MAP_SHARED, fd, 0);
 #    else
         m_memory = (std::uint32_t*)mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_ANON | MAP_PRIVATE, -1, 0);
+        m_write_memory = m_memory;
 #    endif
 #endif
 
-        if (m_memory == nullptr || m_memory == MAP_FAILED)
+#if !defined(__ANDROID__)
+        m_write_memory = m_memory;
+#endif
+
+        if (m_memory == nullptr || m_memory == MAP_FAILED || m_write_memory == nullptr || m_write_memory == MAP_FAILED)
             throw std::bad_alloc{};
     }
 
@@ -61,6 +77,10 @@ public:
         VirtualFree((void*)m_memory, 0, MEM_RELEASE);
 #else
         munmap(m_memory, m_size);
+#    if defined(__ANDROID__)
+        munmap(m_write_memory, m_size);
+        close(fd);
+#    endif
 #endif
     }
 
@@ -71,6 +91,11 @@ public:
 
     std::uint32_t* ptr() const
     {
+        return m_write_memory;
+    }
+
+    std::uint32_t* xptr() const
+    {
         return m_memory;
     }
 
@@ -78,7 +103,7 @@ public:
     {
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
         pthread_jit_write_protect_np(1);
-#elif defined(__APPLE__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__ANDROID__)
+#elif defined(__APPLE__) || defined(__NetBSD__) || defined(__OpenBSD__)
         mprotect(m_memory, m_size, PROT_READ | PROT_EXEC);
 #endif
     }
@@ -87,7 +112,7 @@ public:
     {
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
         pthread_jit_write_protect_np(0);
-#elif defined(__APPLE__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__ANDROID__)
+#elif defined(__APPLE__) || defined(__NetBSD__) || defined(__OpenBSD__)
         mprotect(m_memory, m_size, PROT_READ | PROT_WRITE);
 #endif
     }
@@ -140,7 +165,11 @@ public:
     }
 
 protected:
+#if defined(__ANDROID__)
+    int fd = -1;
+#endif
     std::uint32_t* m_memory;
+    std::uint32_t* m_write_memory = nullptr;
     std::size_t m_size = 0;
 };
 
