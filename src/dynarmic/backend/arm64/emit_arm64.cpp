@@ -6,6 +6,8 @@
 #include "dynarmic/backend/arm64/emit_arm64.h"
 
 #include <oaknut/oaknut.hpp>
+#include <cstdio>
+#include <cstdlib>
 
 #include "dynarmic/backend/arm64/abi.h"
 #include "dynarmic/backend/arm64/emit_context.h"
@@ -192,6 +194,12 @@ static void EmitAddCycles(oaknut::CodeGenerator& code, EmitContext& ctx, size_t 
 }
 
 EmittedBlockInfo EmitArm64(oaknut::CodeGenerator& code, IR::Block block, const EmitConfig& conf, FastmemManager& fastmem_manager) {
+    if (const char* trace = std::getenv("DYNARMIC_TRACE_BLOCKS"); trace && trace[0] == '1') {
+        const auto location = A64::LocationDescriptor{block.Location()};
+        std::fprintf(stderr, "DYNARMIC_JIT_BLOCK_COMPILE_BEGIN guest_pc=%#llx single_step=%s host=%p\n", static_cast<unsigned long long>(location.PC()), location.SingleStepping() ? "true" : "false", static_cast<void*>(code.xptr<void*>()));
+        std::fflush(stderr);
+    }
+
     if (conf.very_verbose_debugging_output) {
         std::puts(IR::DumpBlock(block).c_str());
     }
@@ -264,6 +272,10 @@ EmittedBlockInfo EmitArm64(oaknut::CodeGenerator& code, IR::Block block, const E
     code.BRK(0);
 
     ebi.size = code.xptr<CodePtr>() - ebi.entry_point;
+    if (const char* trace = std::getenv("DYNARMIC_TRACE_BLOCKS"); trace && trace[0] == '1') {
+        std::fprintf(stderr, "DYNARMIC_JIT_BLOCK_COMPILE_END guest_pc=%#llx host=%p size=%zu executable=true\n", static_cast<unsigned long long>(A64::LocationDescriptor{block.Location()}.PC()), static_cast<void*>(ebi.entry_point), ebi.size);
+        std::fflush(stderr);
+    }
     return ebi;
 }
 

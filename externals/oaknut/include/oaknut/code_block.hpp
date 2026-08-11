@@ -123,13 +123,29 @@ public:
 #endif
     }
 
-    void invalidate(std::uint32_t* mem, std::size_t size)
+    void invalidate(std::uint32_t* executable_memory, std::size_t size)
     {
 #if defined(__APPLE__)
-        sys_icache_invalidate(mem, size);
+        sys_icache_invalidate(executable_memory, size);
 #elif defined(_WIN32)
-        FlushInstructionCache(GetCurrentProcess(), mem, size);
+        FlushInstructionCache(GetCurrentProcess(), executable_memory, size);
 #else
+        const auto executable_address = reinterpret_cast<std::uintptr_t>(executable_memory);
+        const auto code_address = reinterpret_cast<std::uintptr_t>(m_memory);
+        const auto write_address = reinterpret_cast<std::uintptr_t>(m_write_memory) + (executable_address - code_address);
+        invalidate_impl(reinterpret_cast<void*>(write_address), executable_memory, size);
+#endif
+    }
+
+    void invalidate_all()
+    {
+        invalidate(m_memory, m_size);
+    }
+
+private:
+#if !defined(__APPLE__) && !defined(_WIN32)
+    static void invalidate_impl(void* writable_memory, void* executable_memory, std::size_t size)
+    {
         static std::size_t icache_line_size = 0x10000, dcache_line_size = 0x10000;
 
         std::uint64_t ctr;
@@ -138,10 +154,12 @@ public:
 
         const std::size_t isize = icache_line_size = std::min<std::size_t>(icache_line_size, 4 << ((ctr >> 0) & 0xf));
         const std::size_t dsize = dcache_line_size = std::min<std::size_t>(dcache_line_size, 4 << ((ctr >> 16) & 0xf));
+        const std::uintptr_t writable_start = reinterpret_cast<std::uintptr_t>(writable_memory);
+        const std::uintptr_t executable_start = reinterpret_cast<std::uintptr_t>(executable_memory);
+        const std::uintptr_t writable_end = writable_start + size;
+        const std::uintptr_t executable_end = executable_start + size;
 
-        const std::uintptr_t end = (std::uintptr_t)mem + size;
-
-        for (std::uintptr_t addr = ((std::uintptr_t)mem) & ~(dsize - 1); addr < end; addr += dsize) {
+        for (std::uintptr_t addr = writable_start & ~(dsize - 1); addr < writable_end; addr += dsize) {
             __asm__ volatile("dc cvau, %0"
                              :
                              : "r"(addr)
@@ -152,7 +170,7 @@ public:
                          :
                          : "memory");
 
-        for (std::uintptr_t addr = ((std::uintptr_t)mem) & ~(isize - 1); addr < end; addr += isize) {
+        for (std::uintptr_t addr = executable_start & ~(isize - 1); addr < executable_end; addr += isize) {
             __asm__ volatile("ic ivau, %0"
                              :
                              : "r"(addr)
@@ -162,13 +180,8 @@ public:
                          :
                          :
                          : "memory");
+    }
 #endif
-    }
-
-    void invalidate_all()
-    {
-        invalidate(m_memory, m_size);
-    }
 
 protected:
 #if defined(__ANDROID__)

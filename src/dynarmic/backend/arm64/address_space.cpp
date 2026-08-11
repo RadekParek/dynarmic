@@ -4,6 +4,7 @@
  */
 
 #include <cstdio>
+#include <cstdlib>
 
 #include <mcl/bit_cast.hpp>
 
@@ -61,12 +62,32 @@ CodePtr AddressSpace::ReverseGetEntryPoint(CodePtr host_pc) {
 }
 
 CodePtr AddressSpace::GetOrEmit(IR::LocationDescriptor descriptor) {
+    const auto trace = [] {
+        const char* value = std::getenv("DYNARMIC_TRACE_BLOCKS");
+        return value && value[0] == '1';
+    };
+    if (trace()) {
+        fmt::print(stderr, "DYNARMIC_JIT_BLOCK_LOOKUP guest_descriptor={:#x}\n", descriptor.Value());
+        std::fflush(stderr);
+    }
     if (CodePtr block_entry = Get(descriptor)) {
+        if (trace()) {
+            fmt::print(stderr, "DYNARMIC_JIT_BLOCK_LOOKUP_HIT guest_descriptor={:#x} host={:p}\n", descriptor.Value(), static_cast<void*>(block_entry));
+            std::fflush(stderr);
+        }
         return block_entry;
     }
 
+    if (trace()) {
+        fmt::print(stderr, "DYNARMIC_JIT_BLOCK_LOOKUP_MISS guest_descriptor={:#x}\n", descriptor.Value());
+        std::fflush(stderr);
+    }
     IR::Block ir_block = GenerateIR(descriptor);
     const EmittedBlockInfo block_info = Emit(std::move(ir_block));
+    if (trace()) {
+        fmt::print(stderr, "DYNARMIC_JIT_BLOCK_READY guest_descriptor={:#x} host={:p} executable=true\n", descriptor.Value(), static_cast<void*>(block_info.entry_point));
+        std::fflush(stderr);
+    }
     return block_info.entry_point;
 }
 
